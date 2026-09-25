@@ -13,6 +13,12 @@ Release/
 x64/
 x86/
 
+# Visual Studio solution/project files
+*.slnx
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
 # Build directories
 build/
 cmake-build-debug/
