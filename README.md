@@ -4,7 +4,7 @@
 Alexander Reynolds
 
 ## Description
-Submission by Alexander Reynolds for Assignment 1: Network Packet Buffer Pool
+This project implements a fixed-size network packet memory pool using a custom Stack ADT. The pool reserves memory at construction, allocates and deallocates blocks in O(1) time, supports binary packet data, rejects invalid and duplicate deallocations, and uses LIFO behavior.
 
 ## Stack Implementation
 Linked Structure. I chose a linked structure because it keeps the push() and pop() operations simple, only needing to either create a new node at the top, or remove the top node. A linked structure also means I don't need to worry about the size of the array, or resizing it at runtime.
