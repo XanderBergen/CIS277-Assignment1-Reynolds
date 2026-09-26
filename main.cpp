@@ -2,6 +2,7 @@
 #include <iomanip>
 #include <cstring>
 #include <vector>
+#include <cstddef>
 
 #include "MemoryPool.h"
 
@@ -11,6 +12,23 @@ int main()
     const std::size_t blockCount = 8;
 
     MemoryPool pool(blockSize, blockCount);
+
+    int testsPassed = 0;
+    int testsFailed = 0;
+
+    auto check = [&](bool condition, const char* testName)
+        {
+            if (condition)
+            {
+                std::cout << "[PASS] " << testName << '\n';
+                ++testsPassed;
+            }
+            else
+            {
+                std::cout << "[FAIL] " << testName << '\n';
+                ++testsFailed;
+            }
+        };
 
     std::cout << "Network Packet Buffer Pool\n\n";
 
@@ -24,7 +42,30 @@ int main()
         << pool.capacity() << " bytes\n\n";
 
 
+    // ---------------------------------------------------------
+    // Initial pool tests
+    // ---------------------------------------------------------
+
+    std::cout << "--- Initial Pool Tests ---\n";
+
+    check(pool.blockSize() == blockSize,
+        "blockSize() returns the correct value");
+
+    check(pool.capacity() == blockSize * blockCount,
+        "capacity() returns the correct value");
+
+    check(pool.availableBlocks() == blockCount,
+        "All blocks are initially available");
+
+    check(pool.allocatedBlocks() == 0,
+        "No blocks are initially allocated");
+
+
+    // ---------------------------------------------------------
     // Allocate several blocks
+    // ---------------------------------------------------------
+
+    std::cout << "\n--- Allocation Tests ---\n";
 
     void* packet1 = pool.allocate();
     void* packet2 = pool.allocate();
@@ -34,14 +75,38 @@ int main()
     std::cout << "Packet 2 allocated: " << packet2 << '\n';
     std::cout << "Packet 3 allocated: " << packet3 << '\n';
 
+    check(packet1 != nullptr,
+        "Packet 1 allocation succeeded");
+
+    check(packet2 != nullptr,
+        "Packet 2 allocation succeeded");
+
+    check(packet3 != nullptr,
+        "Packet 3 allocation succeeded");
+
+    check(packet1 != packet2 &&
+        packet1 != packet3 &&
+        packet2 != packet3,
+        "Allocated blocks have unique addresses");
+
+    check(pool.availableBlocks() == 5,
+        "Five blocks remain after three allocations");
+
+    check(pool.allocatedBlocks() == 3,
+        "Three blocks are reported as allocated");
+
     std::cout << "\nAvailable blocks: "
         << pool.availableBlocks() << '\n';
 
     std::cout << "Allocated blocks: "
-        << pool.allocatedBlocks() << "\n\n";
+        << pool.allocatedBlocks() << '\n';
 
 
-    // Store binary packet data
+    // ---------------------------------------------------------
+    // Binary data test
+    // ---------------------------------------------------------
+
+    std::cout << "\n--- Binary Data Test ---\n";
 
     unsigned char packetData[] =
     {
@@ -49,10 +114,14 @@ int main()
         0xAB, 0xCD, 0x12, 0x34
     };
 
+    bool binaryTestPassed = false;
+
     if (packet1 != nullptr &&
         sizeof(packetData) <= pool.blockSize())
     {
-        std::memcpy(packet1, packetData, sizeof(packetData));
+        std::memcpy(packet1,
+            packetData,
+            sizeof(packetData));
 
         std::cout << "Binary packet written to Packet 1.\n";
 
@@ -61,7 +130,9 @@ int main()
 
         std::cout << "Packet 1 data: ";
 
-        for (std::size_t i = 0; i < sizeof(packetData); ++i)
+        for (std::size_t i = 0;
+            i < sizeof(packetData);
+            ++i)
         {
             std::cout << "0x"
                 << std::hex
@@ -75,57 +146,79 @@ int main()
         std::cout << std::dec
             << std::nouppercase
             << std::setfill(' ')
-            << "\n";
+            << '\n';
 
-        bool dataMatches =
+        binaryTestPassed =
             std::memcmp(packet1,
                 packetData,
                 sizeof(packetData)) == 0;
-
-        std::cout << "Binary data read-back verification: "
-            << (dataMatches ? "successful" : "failed")
-            << "\n\n";
     }
 
+    check(binaryTestPassed,
+        "Binary data can be written and read back correctly");
 
-    // Release a block
+
+    // ---------------------------------------------------------
+    // Memory reuse test
+    // ---------------------------------------------------------
+
+    std::cout << "\n--- Memory Reuse Test ---\n";
 
     void* releasedAddress = packet2;
 
-    if (pool.deallocate(packet2))
-    {
-        std::cout << "Packet 2 released.\n";
-    }
+    bool packet2Released =
+        pool.deallocate(packet2);
 
-    std::cout << "Available blocks: "
-        << pool.availableBlocks() << '\n';
+    check(packet2Released,
+        "Packet 2 was successfully released");
 
-    std::cout << "Allocated blocks: "
-        << pool.allocatedBlocks() << "\n\n";
+    check(pool.availableBlocks() == 6,
+        "Available count increased after deallocation");
 
-
-    // Demonstrate memory reuse
+    check(pool.allocatedBlocks() == 2,
+        "Allocated count decreased after deallocation");
 
     void* packet4 = pool.allocate();
+
+    std::cout << "Released address:   "
+        << releasedAddress << '\n';
 
     std::cout << "Packet 4 allocated: "
         << packet4 << '\n';
 
-    if (packet4 == releasedAddress)
+    check(packet4 == releasedAddress,
+        "Packet 4 reused the most recently released block");
+
+
+    // ---------------------------------------------------------
+    // Invalid deallocation tests
+    // ---------------------------------------------------------
+
+    std::cout << "\n--- Invalid Deallocation Tests ---\n";
+
+    check(!pool.deallocate(nullptr),
+        "nullptr deallocation is rejected");
+
+    int outsideVariable = 123;
+
+    check(!pool.deallocate(&outsideVariable),
+        "Pointer outside the memory pool is rejected");
+
+    if (packet1 != nullptr)
     {
-        std::cout
-            << "Packet 4 reused the previously released block.\n";
-    }
-    else
-    {
-        std::cout
-            << "Packet 4 did not reuse the released block.\n";
+        unsigned char* middleOfBlock =
+            static_cast<unsigned char*>(packet1) + 1;
+
+        check(!pool.deallocate(middleOfBlock),
+            "Pointer into the middle of a block is rejected");
     }
 
 
-    // Exhaust the memory pool
+    // ---------------------------------------------------------
+    // Exhaustion tests
+    // ---------------------------------------------------------
 
-    std::cout << "\nAttempting to exhaust pool...\n";
+    std::cout << "\n--- Pool Exhaustion Tests ---\n";
 
     std::vector<void*> extraBlocks;
 
@@ -144,54 +237,124 @@ int main()
             << block << '\n';
     }
 
+    check(pool.availableBlocks() == 0,
+        "No blocks remain after pool exhaustion");
 
-    // Attempt allocation after exhaustion
+    check(pool.allocatedBlocks() == blockCount,
+        "All blocks are allocated after exhaustion");
 
     void* failedAllocation = pool.allocate();
 
-    if (failedAllocation == nullptr)
-    {
-        std::cout << "\nNo blocks available.\n";
-        std::cout << "allocate() returned nullptr.\n";
-    }
+    check(failedAllocation == nullptr,
+        "allocate() returns nullptr when pool is exhausted");
 
-    std::cout << "\nAvailable blocks: "
-        << pool.availableBlocks() << '\n';
+    // Test it again to make sure exhaustion does not alter state.
+    void* secondFailedAllocation = pool.allocate();
 
-    std::cout << "Allocated blocks: "
-        << pool.allocatedBlocks() << '\n';
+    check(secondFailedAllocation == nullptr,
+        "Repeated allocation on exhausted pool returns nullptr");
 
+    check(pool.availableBlocks() == 0,
+        "Failed allocations do not change available block count");
 
-    // Demonstrate double-deallocation protection
-
-    std::cout << "\nAttempting double deallocation...\n";
-
-    bool firstDeallocation = pool.deallocate(packet1);
-    bool secondDeallocation = pool.deallocate(packet1);
-
-    std::cout << "First deallocation: "
-        << (firstDeallocation ? "accepted" : "rejected")
-        << '\n';
-
-    std::cout << "Second deallocation: "
-        << (secondDeallocation ? "accepted" : "rejected")
-        << '\n';
-
-    if (!secondDeallocation)
-    {
-        std::cout << "Double deallocation rejected.\n";
-    }
+    check(pool.allocatedBlocks() == blockCount,
+        "Failed allocations do not change allocated block count");
 
 
-    // Clean up remaining allocated blocks
+    // ---------------------------------------------------------
+    // Double-deallocation test
+    // ---------------------------------------------------------
 
-    pool.deallocate(packet3);
-    pool.deallocate(packet4);
+    std::cout << "\n--- Double Deallocation Test ---\n";
+
+    bool firstDeallocation =
+        pool.deallocate(packet1);
+
+    bool secondDeallocation =
+        pool.deallocate(packet1);
+
+    check(firstDeallocation,
+        "First deallocation is accepted");
+
+    check(!secondDeallocation,
+        "Second deallocation of same block is rejected");
+
+    check(pool.availableBlocks() == 1,
+        "Exactly one block becomes available");
+
+    check(pool.allocatedBlocks() == blockCount - 1,
+        "Allocated count decreases exactly once");
+
+
+    // ---------------------------------------------------------
+    // Reallocation after double-deallocation test
+    // ---------------------------------------------------------
+
+    std::cout << "\n--- Reallocation Test ---\n";
+
+    void* packet1Again = pool.allocate();
+
+    std::cout << "Original Packet 1 address: "
+        << packet1 << '\n';
+
+    std::cout << "Reallocated address:       "
+        << packet1Again << '\n';
+
+    check(packet1Again == packet1,
+        "Released Packet 1 block is reused");
+
+    check(pool.availableBlocks() == 0,
+        "Pool is exhausted again after reallocation");
+
+    check(pool.allocatedBlocks() == blockCount,
+        "All blocks are allocated again");
+
+
+    // ---------------------------------------------------------
+    // Cleanup
+    // ---------------------------------------------------------
+
+    std::cout << "\n--- Cleanup Tests ---\n";
+
+    check(pool.deallocate(packet1Again),
+        "Reallocated Packet 1 cleaned up");
+
+    check(pool.deallocate(packet3),
+        "Packet 3 cleaned up");
+
+    check(pool.deallocate(packet4),
+        "Packet 4 cleaned up");
+
+    bool extraCleanupSucceeded = true;
 
     for (void* block : extraBlocks)
     {
-        pool.deallocate(block);
+        if (!pool.deallocate(block))
+        {
+            extraCleanupSucceeded = false;
+        }
     }
+
+    check(extraCleanupSucceeded,
+        "All additional blocks cleaned up");
+
+    check(pool.availableBlocks() == blockCount,
+        "All blocks are available after cleanup");
+
+    check(pool.allocatedBlocks() == 0,
+        "No blocks remain allocated after cleanup");
+
+
+    // ---------------------------------------------------------
+    // Final results
+    // ---------------------------------------------------------
+
+    std::cout << "\n=================================\n";
+    std::cout << "Test Summary\n";
+    std::cout << "=================================\n";
+
+    std::cout << "Tests passed: " << testsPassed << '\n';
+    std::cout << "Tests failed: " << testsFailed << '\n';
 
     std::cout << "\nFinal available blocks: "
         << pool.availableBlocks() << '\n';
@@ -199,5 +362,14 @@ int main()
     std::cout << "Final allocated blocks: "
         << pool.allocatedBlocks() << '\n';
 
-    return 0;
-}
+    if (testsFailed == 0)
+    {
+        std::cout << "\nAll tests passed successfully.\n";
+    }
+    else
+    {
+        std::cout << "\nOne or more tests failed.\n";
+    }
+
+    return testsFailed == 0 ? 0 : 1;
+};
